@@ -1,8 +1,6 @@
-package main
+package ipcalc
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,18 +12,18 @@ var TwoFiveFive uint32 = 4294967295
 
 // Ipv4 represents the properties of an Ipv4 address/network using 32-bit unsigned integers.
 type Ipv4 struct {
-	Host      uint32
-	Mask      uint32
-	Network   uint32
-	Broadcast uint32
+	Host uint32
+	Mask uint32
 }
 
-func (i *Ipv4) setNetwork() {
-	i.Network = i.Mask + i.Host - (i.Mask | i.Host)
+// Network returns an Ipv4 object's network address.
+func (i *Ipv4) Network() uint32 {
+	return i.Mask + i.Host - (i.Mask | i.Host)
 }
 
-func (i *Ipv4) setBroadcast() {
-	i.Broadcast = TwoFiveFive - i.Mask + i.Network
+// Broadcast returns an Ipv4 object's broadcast address.
+func (i *Ipv4) Broadcast() uint32 {
+	return TwoFiveFive - i.Mask + i.Network()
 }
 
 // CidrToIpv4 converts takes a string in CIDR format and returns an Ipv4 type.
@@ -35,7 +33,7 @@ func CidrToIpv4(c string) (Ipv4, error) {
 
 	cidrArr := strings.Split(c, "/")
 
-	h, err := stringToHost(cidrArr[0])
+	h, err := DottedDecimalToUint32(cidrArr[0])
 	if err != nil {
 		return res, errors.New("Failed to convert CIDR string to bits")
 	}
@@ -50,35 +48,24 @@ func CidrToIpv4(c string) (Ipv4, error) {
 	} else {
 		res.Mask = TwoFiveFive
 	}
-	res.setNetwork()
-	res.setBroadcast()
 	return res, nil
 }
 
-// Convert Ipv4 dotted decimal string to 32-bit binary
-func stringToHost(s string) (uint32, error) {
+// DottedDecimalToUint32 converts a dotted decimal string (as seen in Ipv4 addresses) to a 32-bit binary unsigned integer.
+func DottedDecimalToUint32(s string) (uint32, error) {
 	octets := strings.Split(s, ".")
-	var host []byte
-
-	for _, b := range octets {
-		n, err := strconv.Atoi(b)
+	if len(octets) != 4 {
+		return 0, errors.New("Dotted decimal string for a 32-bit number must contain 3 dots")
+	}
+	var b [4]uint8
+	for i, v := range octets {
+		n, err := strconv.Atoi(v)
 		if (err != nil) || (n < 0) || (n > 255) {
-			return 0, errors.New("Failed to convert dotted decimal to bits")
+			return 0, errors.New("Dotted decimal string contains non-numbers")
 		}
-		host = append(host, byte(n))
+		b[i] = uint8(n)
 	}
-
-	if len(host) != 4 {
-		return 0, errors.New("Failed to convert dotted decimal to bits")
-	}
-
-	buf := bytes.NewReader(host)
-	var res uint32
-	err := binary.Read(buf, binary.BigEndian, &res)
-	if err != nil {
-		return 0, errors.New("Failed to convert dotted decimal to bits")
-	}
-	return res, nil
+	return (uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])), nil
 }
 
 // Convert CIDR prefix length string (without the "/") to bitmask
@@ -100,14 +87,16 @@ func (i *Ipv4) ToCidr() string {
 }
 
 func hostToString(n uint32) string {
-	a := make([]byte, 4)
-	binary.BigEndian.PutUint32(a, n)
-	w := []string{}
-	for _, b := range a {
-		s := strconv.Itoa(int(b))
-		w = append(w, s)
+	a := [4]uint8{
+		uint8(n >> 24),
+		uint8(n >> 16),
+		uint8(n >> 8),
+		uint8(n)}
+	w := [4]string{}
+	for i, n := range a {
+		w[i] = strconv.Itoa(int(n))
 	}
-	return strings.Join(w, ".")
+	return w[0] + "." + w[1] + "." + w[2] + "." + w[3]
 }
 
 func maskToString(m uint32) string {
@@ -123,7 +112,7 @@ func maskToString(m uint32) string {
 
 // IsInNet returns true if all of n1 falls within the bounds of n2.
 func IsInNet(n1 Ipv4, n2 Ipv4) bool {
-	if (n1.Host >= n2.Host) && (n1.Broadcast <= n2.Broadcast) {
+	if (n1.Host >= n2.Host) && (n1.Broadcast() <= n2.Broadcast()) {
 		return true
 	}
 	return false
@@ -157,13 +146,13 @@ func Overlap(n1 Ipv4, n2 Ipv4) []Ipv4 {
 	var start uint32
 	var stop uint32
 	start = hi.Host
-	if lo.Broadcast < hi.Broadcast {
-		stop = lo.Broadcast
+	if lo.Broadcast() < hi.Broadcast() {
+		stop = lo.Broadcast()
 	} else {
-		stop = hi.Broadcast
+		stop = hi.Broadcast()
 	}
 
-	if (stop < start) || (start > lo.Broadcast) {
+	if (stop < start) || (start > lo.Broadcast()) {
 		return []Ipv4{}
 	}
 
@@ -177,12 +166,10 @@ func Overlap(n1 Ipv4, n2 Ipv4) []Ipv4 {
 // Subnet summarizes a range of IP addresses defined by uint32 bounds into
 // the smallest possible amount of subnets (largest possible network sizes).
 func Subnet(start uint32, stop uint32) ([]Ipv4, error) {
-	fmt.Printf("Subnetting %v to %v\n", start, stop)
 	if start == stop {
 		return []Ipv4{{Host: start,
-			Mask:      TwoFiveFive,
-			Network:   start,
-			Broadcast: start}}, nil
+			Mask: TwoFiveFive,
+		}}, nil
 	}
 
 	if start > stop {
@@ -199,24 +186,22 @@ func Subnet(start uint32, stop uint32) ([]Ipv4, error) {
 		}
 	}
 	for {
-		lo.setNetwork()
-		if lo.Network == lo.Host {
+		if lo.Network() == lo.Host {
 			break
 		}
 		lo.Mask = uint32(1)<<31 + lo.Mask>>1
 	}
-	lo.setBroadcast()
 
 	res := []Ipv4{lo}
 
-	if lo.Broadcast == stop {
+	if lo.Broadcast() == stop {
 		return res, nil
 	}
-	if lo.Broadcast > stop {
+	if lo.Broadcast() > stop {
 		return res, errors.New("Internal Error")
 	}
 
-	next, err := Subnet(lo.Broadcast+1, stop)
+	next, err := Subnet(lo.Broadcast()+1, stop)
 	if err != nil {
 		return res, err
 	}
