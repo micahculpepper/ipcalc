@@ -8,25 +8,78 @@ import (
 )
 
 // TwoFiveFive = 255.255.255.255
-var TwoFiveFive uint32 = 4294967295
+const TwoFiveFive uint32 = 4294967295
 
-// Ipv4 represents the properties of an Ipv4 address/network using 32-bit unsigned integers.
+// Ipv4 uses 32-bit unsigned integers to represent an Ipv4 address, including the network mask.
 type Ipv4 struct {
-	Host uint32
+	Addr uint32
 	Mask uint32
 }
 
-// Network returns an Ipv4 object's network address.
+// Network calculates and returns an Ipv4 object's network address.
 func (i *Ipv4) Network() uint32 {
-	return i.Mask + i.Host - (i.Mask | i.Host)
+	return i.Mask + i.Addr - (i.Mask | i.Addr)
 }
 
-// Broadcast returns an Ipv4 object's broadcast address.
+// Broadcast calculates and returns an Ipv4 object's broadcast address.
 func (i *Ipv4) Broadcast() uint32 {
 	return TwoFiveFive - i.Mask + i.Network()
 }
 
-// CidrToIpv4 converts takes a string in CIDR format and returns an Ipv4 type.
+// IsIn returns true if all of i falls within the bounds of n.
+func (i *Ipv4) IsIn(n Ipv4) bool {
+	if (i.Addr >= n.Addr) && (i.Broadcast() <= n.Broadcast()) {
+		return true
+	}
+	return false
+}
+
+// ToCidr returns a string representation of an Ipv4 object in CIDR format.
+func (i *Ipv4) ToCidr() (string, error) {
+	h := addrToString(i.Addr)
+	if !i.IsContiguous() {
+		return h, errors.New("Cannot represent discontiguous subnet mask in CIDR notation")
+	}
+	m := maskToString(i.Mask)
+	return h + "/" + m, nil
+}
+
+// IsContiguous returns true if the Ipv4 object has a contiguous network mask
+func (i *Ipv4) IsContiguous() bool {
+	f := false
+	for n := uint32(0); n < 32; n++ {
+		b := i.Mask & (1 << n)
+		if b != 0 {
+			f = true
+		}
+		if f && (b == 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// AddrAndMaskToIpv4 converts a string of format "10.20.30.40 255.255.255.0" to an Ipv4 object.
+func AddrAndMaskToIpv4(s string) (Ipv4, error) {
+	arr := strings.Split(s, " ")
+	if len(arr) != 2 {
+		return Ipv4{}, errors.New("Address and Mask must be separated with a space")
+	}
+
+	a, err := DottedDecimalToUint32(arr[0])
+	if err != nil {
+		return Ipv4{}, err
+	}
+
+	m, err := DottedDecimalToUint32(arr[1])
+	if err != nil {
+		return Ipv4{}, err
+	}
+
+	return Ipv4{Addr: a, Mask: m}, nil
+}
+
+// CidrToIpv4 converts takes a string in CIDR format and returns an Ipv4 object.
 // If the input string has no "/", it assumes a "/32" mask is intended.
 func CidrToIpv4(c string) (Ipv4, error) {
 	var res Ipv4
@@ -37,7 +90,7 @@ func CidrToIpv4(c string) (Ipv4, error) {
 	if err != nil {
 		return res, errors.New("Failed to convert CIDR string to bits")
 	}
-	res.Host = h
+	res.Addr = h
 
 	if len(cidrArr) == 2 {
 		m, err := stringToMask(cidrArr[1])
@@ -78,44 +131,22 @@ func stringToMask(s string) (uint32, error) {
 	return TwoFiveFive - uint32((1<<(32-b))-1), nil
 }
 
-// ToCidr returns a string representation of an Ipv4 object in CIDR format.
-// Discontiguous subnet masks will produce undefined results.
-func (i *Ipv4) ToCidr() string {
-	h := hostToString(i.Host)
-	m := maskToString(i.Mask)
-	return strings.Join([]string{h, m}, "/")
-}
-
-func hostToString(n uint32) string {
-	a := [4]uint8{
-		uint8(n >> 24),
-		uint8(n >> 16),
-		uint8(n >> 8),
-		uint8(n)}
+func addrToString(a uint32) string {
 	w := [4]string{}
-	for i, n := range a {
+	for i, n := range [4]uint8{uint8(a >> 24), uint8(a >> 16), uint8(a >> 8), uint8(a)} {
 		w[i] = strconv.Itoa(int(n))
 	}
 	return w[0] + "." + w[1] + "." + w[2] + "." + w[3]
 }
 
 func maskToString(m uint32) string {
-	for i := 0; i <= 32; i++ {
+	for i := 0; i < 32; i++ {
 		if m == TwoFiveFive {
 			return strconv.Itoa(32 - i)
 		}
 		m = uint32(1)<<31 + m>>1
 	}
-
 	return "0"
-}
-
-// IsInNet returns true if all of n1 falls within the bounds of n2.
-func IsInNet(n1 Ipv4, n2 Ipv4) bool {
-	if (n1.Host >= n2.Host) && (n1.Broadcast() <= n2.Broadcast()) {
-		return true
-	}
-	return false
 }
 
 // Overlap returns a slice of the networks shared by networks n1 and n2.
@@ -124,13 +155,13 @@ func Overlap(n1 Ipv4, n2 Ipv4) []Ipv4 {
 	var hi Ipv4
 
 	switch {
-	case n1.Host < n2.Host:
+	case n1.Addr < n2.Addr:
 		lo = n1
 		hi = n2
-	case n1.Host > n2.Host:
+	case n1.Addr > n2.Addr:
 		hi = n1
 		lo = n2
-	case n1.Host == n2.Host:
+	case n1.Addr == n2.Addr:
 		switch {
 		case n1.Mask > n2.Mask:
 			lo = n1
@@ -145,7 +176,7 @@ func Overlap(n1 Ipv4, n2 Ipv4) []Ipv4 {
 
 	var start uint32
 	var stop uint32
-	start = hi.Host
+	start = hi.Addr
 	if lo.Broadcast() < hi.Broadcast() {
 		stop = lo.Broadcast()
 	} else {
@@ -167,7 +198,7 @@ func Overlap(n1 Ipv4, n2 Ipv4) []Ipv4 {
 // the smallest possible amount of subnets (largest possible network sizes).
 func Subnet(start uint32, stop uint32) ([]Ipv4, error) {
 	if start == stop {
-		return []Ipv4{{Host: start,
+		return []Ipv4{{Addr: start,
 			Mask: TwoFiveFive,
 		}}, nil
 	}
@@ -177,7 +208,7 @@ func Subnet(start uint32, stop uint32) ([]Ipv4, error) {
 	}
 
 	var lo Ipv4
-	lo.Host = start
+	lo.Addr = start
 	sharedBits := start ^ stop
 	for bits := uint(0); bits <= 32; bits++ {
 		if sharedBits>>bits == 0 {
@@ -186,7 +217,7 @@ func Subnet(start uint32, stop uint32) ([]Ipv4, error) {
 		}
 	}
 	for {
-		if lo.Network() == lo.Host {
+		if lo.Network() == lo.Addr {
 			break
 		}
 		lo.Mask = uint32(1)<<31 + lo.Mask>>1
