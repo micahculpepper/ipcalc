@@ -6,7 +6,7 @@ import (
 
 func TestConv(t *testing.T) {
 	cidr := "10.244.170.8/28"
-	ip := Ipv4{Host: 183806472, Mask: 4294967280, Network: 183806464, Broadcast: 183806479}
+	ip := Ipv4{Host: 183806472, Mask: 4294967280}
 
 	t.Log("Testing string conversion.")
 	{
@@ -31,8 +31,8 @@ func TestConv(t *testing.T) {
 }
 
 func TestIsInNet(t *testing.T) {
-	n1 := Ipv4{Host: 183806472, Mask: 4294967280, Network: 183806464, Broadcast: 183806479}
-	n2 := Ipv4{Host: 183806464, Mask: 4294967040, Network: 183806464, Broadcast: 183806719}
+	n1 := Ipv4{Host: 183806472, Mask: 4294967280}
+	n2 := Ipv4{Host: 183806464, Mask: 4294967040}
 	t.Log("Testing network containment detection.")
 	{
 		t.Logf("\tTest 0: 10.244.170.8/28 in 10.244.170.0/24")

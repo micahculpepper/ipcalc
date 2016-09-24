@@ -18,17 +18,22 @@ type Ipv4 struct {
 
 // Network calculates and returns an Ipv4 object's network address.
 func (i *Ipv4) Network() uint32 {
-	return i.Mask + i.Addr - (i.Mask | i.Addr)
+	return i.Mask & i.Addr
 }
 
 // Broadcast calculates and returns an Ipv4 object's broadcast address.
 func (i *Ipv4) Broadcast() uint32 {
-	return TwoFiveFive - i.Mask + i.Network()
+	return (^i.Mask) | i.Addr
+}
+
+type IpNet interface {
+	Network()
+	Broadcast()
 }
 
 // IsIn returns true if all of i falls within the bounds of n.
 func (i *Ipv4) IsIn(n Ipv4) bool {
-	if (i.Addr >= n.Addr) && (i.Broadcast() <= n.Broadcast()) {
+	if (i.Addr >= n.Addr) && (i.Mask <= n.Mask) {
 		return true
 	}
 	return false
